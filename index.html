@@ -1,0 +1,878 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>US Energy Policy Explorer — Senate Energy Committee</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/topojson@3/dist/topojson.min.js"></script>
+  <style>
+    :root {
+      --navy:   #1a2744;
+      --blue:   #2c4a8c;
+      --lblue:  #4a90d9;
+      --coal:   #2d2d2d;
+      --gas:    #e8972f;
+      --renew:  #27ae60;
+      --hydro:  #2980b9;
+      --bg:     #f0f2f7;
+      --panel:  #ffffff;
+      --border: #dce1e8;
+      --text:   #2c3e50;
+      --muted:  #6c7a8d;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 13px;
+    }
+
+    /* ── HEADER ─────────────────────────────── */
+    header {
+      background: var(--navy);
+      color: #fff;
+      padding: 14px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    header h1 { font-size: 1.25rem; font-weight: 700; letter-spacing: .3px; }
+    header p  { font-size: .75rem; opacity: .7; margin-top: 3px; }
+    .header-badge {
+      background: rgba(255,255,255,.12);
+      border: 1px solid rgba(255,255,255,.2);
+      border-radius: 6px;
+      padding: 6px 14px;
+      text-align: center;
+      font-size: .72rem;
+      opacity: .85;
+      line-height: 1.5;
+    }
+
+    /* ── CONTROLS ────────────────────────────── */
+    .controls {
+      background: var(--blue);
+      padding: 8px 24px;
+      display: flex;
+      gap: 28px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .ctrl { display: flex; align-items: center; gap: 8px; color: #fff; }
+    .ctrl label { font-weight: 600; font-size: .78rem; white-space: nowrap; opacity: .9; }
+    .ctrl select {
+      background: rgba(255,255,255,.15);
+      border: 1px solid rgba(255,255,255,.25);
+      color: #fff;
+      border-radius: 4px;
+      padding: 3px 8px;
+      font-size: .78rem;
+      cursor: pointer;
+    }
+    .ctrl select option { background: var(--navy); color: #fff; }
+    input[type=range] {
+      -webkit-appearance: none;
+      width: 160px;
+      height: 4px;
+      background: rgba(255,255,255,.3);
+      border-radius: 2px;
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px; height: 14px;
+      background: #fff;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    #year-val { font-weight: 700; font-size: .9rem; min-width: 38px; }
+    .state-pill {
+      background: rgba(255,255,255,.15);
+      border: 1px solid rgba(255,255,255,.3);
+      border-radius: 12px;
+      padding: 2px 10px;
+      font-size: .78rem;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .state-pill .clear-btn {
+      cursor: pointer;
+      opacity: .7;
+      font-size: .7rem;
+      padding: 0 2px;
+    }
+    .state-pill .clear-btn:hover { opacity: 1; }
+
+    /* ── DASHBOARD GRID ─────────────────────── */
+    .dashboard {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: auto auto;
+      gap: 14px;
+      padding: 14px;
+    }
+    .panel {
+      background: var(--panel);
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      padding: 14px 16px 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.07);
+      overflow: hidden;
+    }
+    .panel-full { grid-column: 1 / -1; }
+    .panel-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .panel-title {
+      font-size: .82rem;
+      font-weight: 700;
+      color: var(--navy);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .task-tag {
+      font-size: .62rem;
+      font-weight: 700;
+      background: var(--lblue);
+      color: #fff;
+      padding: 2px 7px;
+      border-radius: 9px;
+      letter-spacing: .2px;
+    }
+    .panel-sub {
+      font-size: .7rem;
+      color: var(--muted);
+      margin-top: 2px;
+    }
+
+    /* ── LEGEND ─────────────────────────────── */
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .leg-item {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      cursor: pointer;
+      font-size: .72rem;
+      color: var(--text);
+      user-select: none;
+    }
+    .leg-item.faded { opacity: .3; }
+    .leg-swatch {
+      width: 10px; height: 10px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    /* ── MAP ────────────────────────────────── */
+    #map-svg { display: block; }
+    .state-path {
+      stroke: #fff;
+      stroke-width: .5;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    .state-path:hover { stroke-width: 1.5; opacity: .85; }
+    .state-path.selected { stroke: #fff; stroke-width: 2; }
+    .map-legend-group text { font-size: .65rem; fill: var(--muted); }
+
+    /* ── CHARTS ─────────────────────────────── */
+    .chart-svg text { font-family: 'Segoe UI', system-ui, sans-serif; }
+    .axis text { font-size: .68rem; fill: var(--muted); }
+    .axis path, .axis line { stroke: #e0e4eb; }
+    .grid line { stroke: #eef0f4; }
+    .line-path { fill: none; stroke-width: 2; }
+    .dot-circle { cursor: pointer; }
+    .area-path { opacity: .12; }
+
+    /* ── TOOLTIP ────────────────────────────── */
+    #tooltip {
+      position: fixed;
+      background: rgba(18,28,54,.93);
+      color: #fff;
+      padding: 9px 13px;
+      border-radius: 7px;
+      font-size: .76rem;
+      line-height: 1.6;
+      pointer-events: none;
+      opacity: 0;
+      transition: opacity .12s;
+      z-index: 999;
+      max-width: 220px;
+    }
+    #tooltip strong { font-weight: 700; display: block; margin-bottom: 2px; }
+
+    /* ── LOADING ────────────────────────────── */
+    .loading {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 220px;
+      color: var(--muted);
+      gap: 8px;
+    }
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid #dce1e8;
+      border-top-color: var(--lblue);
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── DATA NOTE ──────────────────────────── */
+    .data-note {
+      background: #fffbeb;
+      border-left: 3px solid #f5a623;
+      padding: 6px 10px;
+      font-size: .7rem;
+      color: #856404;
+      border-radius: 0 4px 4px 0;
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>US Energy Policy Explorer</h1>
+    <p>Senate Energy Committee · Historical Analysis 1960–2019</p>
+  </div>
+  <div class="header-badge">
+    US Dept. of Energy<br>State Energy Data System (EIA)
+  </div>
+</header>
+
+<div class="controls">
+  <div class="ctrl">
+    <label>Map Year:</label>
+    <input type="range" id="year-slider" min="1960" max="2019" value="2019" step="1">
+    <span id="year-val">2019</span>
+  </div>
+  <div class="ctrl">
+    <label>Map Metric:</label>
+    <select id="metric-sel">
+      <option value="coalElec">Coal Consumption — Electric Power (BBtu)</option>
+      <option value="coalTotal">Coal Consumption — All Sectors (BBtu)</option>
+      <option value="renewTotal">Renewables Consumption — Comm+Ind (BBtu)</option>
+      <option value="coalPriceElec">Coal Price — Electric Power ($/MMBtu)</option>
+      <option value="gasPriceElec">Natural Gas Price — Electric Power ($/MMBtu)</option>
+      <option value="gasCommPrice">Natural Gas Price — Commercial ($/MMBtu)</option>
+    </select>
+  </div>
+  <div class="ctrl">
+    <label>Focus:</label>
+    <div class="state-pill" id="state-pill">
+      <span id="state-pill-label">All States (National)</span>
+      <span class="clear-btn" id="clear-state" style="display:none" title="Clear selection">✕</span>
+    </div>
+  </div>
+</div>
+
+<div class="dashboard">
+
+  <!-- PANEL 1: US MAP -->
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">
+          <span class="task-tag">Task 3</span>
+          State-Level Energy Profile
+        </div>
+        <div class="panel-sub">Click a state to focus trend and price charts on that state</div>
+      </div>
+    </div>
+    <div id="map-container"><div class="loading"><div class="spinner"></div> Loading map…</div></div>
+  </div>
+
+  <!-- PANEL 2: ENERGY TRENDS -->
+  <div class="panel">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">
+          <span class="task-tag">Task 1</span>
+          Energy Consumption Trends
+        </div>
+        <div class="panel-sub" id="trend-sub">National totals · click map to filter by state</div>
+      </div>
+    </div>
+    <div id="trend-container"><div class="loading"><div class="spinner"></div> Loading…</div></div>
+    <div class="legend" id="trend-legend"></div>
+    <div class="data-note">
+      ⚠ Renewables here = commercial &amp; industrial on-site solar, wind, hydro, geothermal — utility-scale generation not separately captured in this dataset.
+    </div>
+  </div>
+
+  <!-- PANEL 3: PRICE COMPARISON (full width) -->
+  <div class="panel panel-full">
+    <div class="panel-head">
+      <div>
+        <div class="panel-title">
+          <span class="task-tag">Task 2</span>
+          Energy Price Comparison
+        </div>
+        <div class="panel-sub" id="price-sub">Median state price ($/MMBtu) · click legend to toggle series</div>
+      </div>
+    </div>
+    <div id="price-container"><div class="loading"><div class="spinner"></div> Loading…</div></div>
+    <div class="legend" id="price-legend"></div>
+  </div>
+
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  CONSTANTS
+// ═══════════════════════════════════════════════════════
+
+const COAL_ELEC   = "Consumption.Electric Power.Coal";
+const GAS_ELEC    = "Consumption.Electric Power.Natural Gas";
+const COAL_COLS   = [
+  "Consumption.Commercial.Coal",
+  "Consumption.Electric Power.Coal",
+  "Consumption.Industrial.Coal",
+  "Consumption.Refinery.Coal",
+  "Consumption.Residential.Coal",
+  "Consumption.Transportation.Coal"
+];
+const GAS_COLS    = [
+  "Consumption.Commercial.Natural Gas",
+  "Consumption.Electric Power.Natural Gas",
+  "Consumption.Industrial.Natural Gas",
+  "Consumption.Refinery.Natural Gas",
+  "Consumption.Residential.Natural Gas",
+  "Consumption.Transportation.Natural Gas"
+];
+const RENEW_COLS  = [
+  "Consumption.Commercial.Solar",
+  "Consumption.Industrial.Solar",
+  "Consumption.Commercial.Wind",
+  "Consumption.Industrial.Wind",
+  "Consumption.Commercial.Geothermal",
+  "Consumption.Industrial.Geothermal",
+  "Consumption.Residential.Geothermal",
+  "Consumption.Commercial.Hydropower",
+  "Consumption.Industrial.Hydropower"
+];
+const PETRO_COLS  = [
+  "Consumption.Commercial.Petroleum",
+  "Consumption.Industrial.Petroleum",
+  "Consumption.Residential.Petroleum",
+  "Consumption.Transportation.Petroleum"
+];
+
+const PRICE_SERIES = [
+  { key: "Price.Electric Power.Coal",        label: "Coal — Electric Power",   color: "#2d2d2d", dash: "" },
+  { key: "Price.Electric Power.Natural Gas",  label: "Nat Gas — Electric Power",color: "#e8972f", dash: "" },
+  { key: "Price.Commercial.Natural Gas",      label: "Nat Gas — Commercial",    color: "#5ab4d6", dash: "4,3" },
+  { key: "Price.Industrial.Natural Gas",      label: "Nat Gas — Industrial",    color: "#27ae60", dash: "4,3" },
+  { key: "Price.Commercial.Coal",             label: "Coal — Commercial",       color: "#7f8c8d", dash: "4,3" },
+];
+
+const TREND_SERIES = [
+  { key: "coalElec",   label: "Coal (Electric Power)", color: "#2d2d2d" },
+  { key: "gasElec",    label: "Nat Gas (Electric)",    color: "#e8972f" },
+  { key: "coalTotal",  label: "Coal (All Sectors)",    color: "#555",   dash: "4,3" },
+  { key: "renewTotal", label: "Renewables (on-site)",  color: "#27ae60" },
+];
+
+const FIPS = {
+  "01":"Alabama","02":"Alaska","04":"Arizona","05":"Arkansas","06":"California",
+  "08":"Colorado","09":"Connecticut","10":"Delaware","11":"District of Columbia",
+  "12":"Florida","13":"Georgia","15":"Hawaii","16":"Idaho","17":"Illinois",
+  "18":"Indiana","19":"Iowa","20":"Kansas","21":"Kentucky","22":"Louisiana",
+  "23":"Maine","24":"Maryland","25":"Massachusetts","26":"Michigan","27":"Minnesota",
+  "28":"Mississippi","29":"Missouri","30":"Montana","31":"Nebraska","32":"Nevada",
+  "33":"New Hampshire","34":"New Jersey","35":"New Mexico","36":"New York",
+  "37":"North Carolina","38":"North Dakota","39":"Ohio","40":"Oklahoma",
+  "41":"Oregon","42":"Pennsylvania","44":"Rhode Island","45":"South Carolina",
+  "46":"South Dakota","47":"Tennessee","48":"Texas","49":"Utah","50":"Vermont",
+  "51":"Virginia","53":"Washington","54":"West Virginia","55":"Wisconsin","56":"Wyoming"
+};
+
+// ═══════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════
+
+let byStateYear  = {};   // { state -> { year -> computed row } }
+let byYearNat    = {};   // { year -> national aggregate }
+let usGeo        = null;
+let selectedState = null;
+let hiddenSeries  = new Set();
+let mapYear      = 2019;
+let mapMetric    = "coalElec";
+
+// ═══════════════════════════════════════════════════════
+//  UTILITIES
+// ═══════════════════════════════════════════════════════
+
+const N  = v => { const x = parseFloat(v); return isNaN(x) ? 0 : x; };
+const SUM = (row, cols) => cols.reduce((a, c) => a + N(row[c]), 0);
+const fmt = d3.format(",.0f");
+const fmtP = d3.format(".2f");
+
+function tooltip(html, evt) {
+  const el = document.getElementById("tooltip");
+  el.innerHTML = html;
+  el.style.opacity = "1";
+  el.style.left = (evt.clientX + 14) + "px";
+  el.style.top  = (evt.clientY - 10) + "px";
+}
+function hideTooltip() {
+  document.getElementById("tooltip").style.opacity = "0";
+}
+
+// ═══════════════════════════════════════════════════════
+//  DATA LOADING & PROCESSING
+// ═══════════════════════════════════════════════════════
+
+function processRow(d) {
+  const coalTotal  = SUM(d, COAL_COLS);
+  const gasTotal   = SUM(d, GAS_COLS);
+  const renewTotal = SUM(d, RENEW_COLS);
+  const petroTotal = SUM(d, PETRO_COLS);
+  const coalElec   = N(d[COAL_ELEC]);
+  const gasElec    = N(d[GAS_ELEC]);
+  const allTotal   = coalTotal + gasTotal + renewTotal + petroTotal;
+  return { ...d, Year: +d.Year, coalTotal, gasTotal, renewTotal, petroTotal, coalElec, gasElec, allTotal };
+}
+
+async function loadData() {
+  const [rows, geo] = await Promise.all([
+    d3.csv("energy.csv"),
+    d3.json("https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json")
+  ]);
+
+  usGeo = geo;
+
+  // index data
+  rows.forEach(r => {
+    const d = processRow(r);
+    const yr = +d.Year;
+    if (!byStateYear[d.State]) byStateYear[d.State] = {};
+    byStateYear[d.State][yr] = d;
+  });
+
+  // national aggregates by year
+  const byYear = d3.group(rows.map(processRow), d => +d.Year);
+  byYear.forEach((arr, yr) => {
+    const nat = { Year: yr };
+    nat.coalTotal  = d3.sum(arr, d => d.coalTotal);
+    nat.gasTotal   = d3.sum(arr, d => d.gasTotal);
+    nat.renewTotal = d3.sum(arr, d => d.renewTotal);
+    nat.coalElec   = d3.sum(arr, d => d.coalElec);
+    nat.gasElec    = d3.sum(arr, d => d.gasElec);
+    // median prices across states
+    PRICE_SERIES.forEach(s => {
+      const vals = arr.map(d => N(d[s.key])).filter(v => v > 0);
+      nat[s.key] = vals.length ? d3.median(vals) : 0;
+    });
+    byYearNat[yr] = nat;
+  });
+
+  setupControls();
+  drawMap();
+  drawTrend();
+  drawPrice();
+}
+
+// ═══════════════════════════════════════════════════════
+//  CONTROLS
+// ═══════════════════════════════════════════════════════
+
+function setupControls() {
+  const slider = document.getElementById("year-slider");
+  const yval   = document.getElementById("year-val");
+  const msel   = document.getElementById("metric-sel");
+
+  slider.addEventListener("input", () => {
+    mapYear = +slider.value;
+    yval.textContent = slider.value;
+    drawMap();
+  });
+  msel.addEventListener("change", () => {
+    mapMetric = msel.value;
+    drawMap();
+  });
+  document.getElementById("clear-state").addEventListener("click", () => {
+    setSelectedState(null);
+  });
+}
+
+function setSelectedState(state) {
+  selectedState = state;
+  const pill  = document.getElementById("state-pill-label");
+  const clear = document.getElementById("clear-state");
+  if (state) {
+    pill.textContent = state;
+    clear.style.display = "inline";
+  } else {
+    pill.textContent = "All States (National)";
+    clear.style.display = "none";
+  }
+  document.getElementById("trend-sub").textContent =
+    state ? `${state} · click map to change or clear above` : "National totals · click map to filter by state";
+  document.getElementById("price-sub").textContent =
+    state ? `${state} energy prices ($/MMBtu)` : "Median state price ($/MMBtu) · click legend to toggle series";
+
+  // re-highlight map
+  d3.selectAll(".state-path").classed("selected", d => FIPS[String(d.id).padStart(2,"0")] === state);
+  drawTrend();
+  drawPrice();
+}
+
+// ═══════════════════════════════════════════════════════
+//  CHOROPLETH MAP
+// ═══════════════════════════════════════════════════════
+
+function getMapValue(state, year, metric) {
+  const d = (byStateYear[state] || {})[year];
+  if (!d) return null;
+  switch (metric) {
+    case "coalElec":    return d.coalElec;
+    case "coalTotal":   return d.coalTotal;
+    case "renewTotal":  return d.renewTotal;
+    case "coalPriceElec": return N(d["Price.Electric Power.Coal"]) || null;
+    case "gasPriceElec":  return N(d["Price.Electric Power.Natural Gas"]) || null;
+    case "gasCommPrice":  return N(d["Price.Commercial.Natural Gas"]) || null;
+    default: return null;
+  }
+}
+
+function drawMap() {
+  const container = document.getElementById("map-container");
+  const W = container.clientWidth || 480;
+  const H = Math.round(W * 0.64);
+
+  // build value lookup
+  const vals = {};
+  Object.keys(FIPS).forEach(fips => {
+    const name = FIPS[fips];
+    const v = getMapValue(name, mapYear, mapMetric);
+    if (v !== null && v > 0) vals[fips] = v;
+  });
+  const domain = d3.extent(Object.values(vals));
+
+  // color scale
+  const isCoal = mapMetric.startsWith("coal");
+  const isRenew = mapMetric.startsWith("renew");
+  const colorScale = d3.scaleSequential(
+    isCoal  ? d3.interpolateGreys :
+    isRenew ? d3.interpolateGreens :
+               d3.interpolateBlues
+  ).domain(domain);
+
+  let svg = d3.select("#map-container").select("svg");
+  if (svg.empty()) {
+    container.innerHTML = "";
+    svg = d3.select("#map-container")
+      .append("svg").attr("id","map-svg");
+  }
+  svg.attr("width", W).attr("height", H + 30);
+
+  const projection = d3.geoAlbersUsa()
+    .fitSize([W, H], topojson.feature(usGeo, usGeo.objects.states));
+  const path = d3.geoPath().projection(projection);
+  const features = topojson.feature(usGeo, usGeo.objects.states).features;
+
+  // states
+  let paths = svg.selectAll(".state-path").data(features, d => d.id);
+  paths.enter()
+    .append("path")
+    .attr("class","state-path")
+    .merge(paths)
+    .attr("d", path)
+    .attr("fill", d => {
+      const fips = String(d.id).padStart(2,"0");
+      return vals[fips] != null ? colorScale(vals[fips]) : "#e8eaef";
+    })
+    .classed("selected", d => FIPS[String(d.id).padStart(2,"0")] === selectedState)
+    .on("mousemove", (evt, d) => {
+      const fips = String(d.id).padStart(2,"0");
+      const name = FIPS[fips] || "Unknown";
+      const v    = vals[fips];
+      const label = document.getElementById("metric-sel").selectedOptions[0].text;
+      tooltip(`<strong>${name} (${mapYear})</strong>${v != null ? label.split("(")[0].trim() + ":<br><b>" + (label.includes("$/") ? "$"+fmtP(v) : fmt(v)) + "</b>" : "<br><em>No data</em>"}`, evt);
+    })
+    .on("mouseleave", hideTooltip)
+    .on("click", (evt, d) => {
+      const fips = String(d.id).padStart(2,"0");
+      const name = FIPS[fips];
+      if (!name) return;
+      setSelectedState(selectedState === name ? null : name);
+    });
+  paths.exit().remove();
+
+  // color legend bar
+  svg.selectAll(".map-legend-group").remove();
+  const lg = svg.append("g").attr("class","map-legend-group")
+    .attr("transform", `translate(${W - 120},${H + 4})`);
+  const defs = svg.append("defs");
+  const gradId = "map-grad-" + mapMetric;
+  defs.selectAll("#"+gradId).remove();
+  const grad = defs.append("linearGradient").attr("id", gradId)
+    .attr("x1","0%").attr("x2","100%");
+  const stops = isCoal ? [[0,"#f5f5f5"],[1,"#1a1a1a"]] : isRenew ? [[0,"#e5f5e0"],[1,"#006d2c"]] : [[0,"#deebf7"],[1,"#08306b"]];
+  stops.forEach(([o,c]) => grad.append("stop").attr("offset",`${o*100}%`).attr("stop-color",c));
+
+  lg.append("rect").attr("width",110).attr("height",6).attr("rx",2).attr("fill",`url(#${gradId})`);
+  const tf = label => label.includes("$/") ? "$"+fmtP(+label) : (domain[+label] > 9999 ? d3.format(".2s")(domain[+label]) : fmt(domain[+label]));
+  lg.append("text").attr("x",0).attr("y",16).text(fmtPrice(domain[0], mapMetric));
+  lg.append("text").attr("x",110).attr("y",16).attr("text-anchor","end").text(fmtPrice(domain[1], mapMetric));
+  function fmtPrice(v, m) { return m.includes("Price") ? "$"+fmtP(v) : d3.format(".2s")(v); }
+}
+
+// ═══════════════════════════════════════════════════════
+//  TREND CHART  (Task 1)
+// ═══════════════════════════════════════════════════════
+
+function getTrendData(state) {
+  if (!state) {
+    return Object.keys(byYearNat).map(Number).sort(d3.ascending).map(yr => byYearNat[yr]);
+  }
+  const sd = byStateYear[state];
+  if (!sd) return [];
+  return Object.keys(sd).map(Number).sort(d3.ascending).map(yr => sd[yr]);
+}
+
+function drawTrend() {
+  const container = document.getElementById("trend-container");
+  const W = container.clientWidth || 460;
+  const H = 200;
+  const M = { top: 10, right: 16, bottom: 34, left: 52 };
+  const iW = W - M.left - M.right;
+  const iH = H - M.top - M.bottom;
+
+  const data = getTrendData(selectedState);
+  const years = data.map(d => d.Year);
+
+  const xScale = d3.scaleLinear().domain(d3.extent(years)).range([0, iW]);
+  const allVals = TREND_SERIES.flatMap(s => data.map(d => d[s.key] || 0));
+  const yScale = d3.scaleLinear().domain([0, d3.max(allVals)]).range([iH, 0]).nice();
+
+  let svg = d3.select("#trend-container").select("svg");
+  if (svg.empty()) {
+    container.innerHTML = "";
+    svg = d3.select("#trend-container")
+      .append("svg").attr("class","chart-svg");
+  }
+  svg.attr("width", W).attr("height", H).selectAll("*").remove();
+  const g = svg.append("g").attr("transform", `translate(${M.left},${M.top})`);
+
+  // grid
+  g.append("g").attr("class","grid")
+    .call(d3.axisLeft(yScale).tickSize(-iW).tickFormat("").ticks(4));
+
+  // axes
+  g.append("g").attr("class","axis")
+    .attr("transform", `translate(0,${iH})`)
+    .call(d3.axisBottom(xScale).tickFormat(d3.format("d")).ticks(8));
+  g.append("g").attr("class","axis")
+    .call(d3.axisLeft(yScale).ticks(4).tickFormat(v => d3.format(".2s")(v)));
+
+  // Y label
+  g.append("text")
+    .attr("transform","rotate(-90)")
+    .attr("x", -iH/2).attr("y", -42)
+    .attr("text-anchor","middle")
+    .style("font-size",".65rem").style("fill","var(--muted)")
+    .text("Billion BTU");
+
+  // lines
+  TREND_SERIES.forEach(s => {
+    if (hiddenSeries.has(s.key)) return;
+    const line = d3.line()
+      .x(d => xScale(d.Year))
+      .y(d => yScale(d[s.key] || 0))
+      .defined(d => (d[s.key] || 0) > 0);
+
+    const path = g.append("path")
+      .datum(data)
+      .attr("class","line-path")
+      .attr("d", line)
+      .attr("stroke", s.color);
+    if (s.dash) path.attr("stroke-dasharray", s.dash);
+  });
+
+  // hover crosshair
+  const bisect = d3.bisector(d => d.Year).left;
+  const vLine = g.append("line")
+    .attr("stroke","#aaa").attr("stroke-width",1)
+    .attr("stroke-dasharray","3,2")
+    .attr("y1",0).attr("y2",iH)
+    .style("opacity",0);
+
+  g.append("rect")
+    .attr("width",iW).attr("height",iH).attr("fill","none")
+    .attr("pointer-events","all")
+    .on("mousemove", evt => {
+      const [mx] = d3.pointer(evt);
+      const yr = Math.round(xScale.invert(mx));
+      const row = data.find(d => +d.Year === yr);
+      if (!row) return;
+      vLine.attr("x1",xScale(yr)).attr("x2",xScale(yr)).style("opacity",1);
+      const lines = TREND_SERIES.filter(s => !hiddenSeries.has(s.key))
+        .map(s => `<span style="color:${s.color}">■</span> ${s.label}: <b>${d3.format(",.0f")(row[s.key]||0)}</b>`)
+        .join("<br>");
+      tooltip(`<strong>${yr}${selectedState ? " · "+selectedState : " · National"}</strong><br>${lines}`, evt);
+    })
+    .on("mouseleave", () => { vLine.style("opacity",0); hideTooltip(); });
+
+  // legend
+  const legEl = document.getElementById("trend-legend");
+  legEl.innerHTML = "";
+  TREND_SERIES.forEach(s => {
+    const item = document.createElement("div");
+    item.className = "leg-item" + (hiddenSeries.has(s.key) ? " faded" : "");
+    item.innerHTML = `<div class="leg-swatch" style="background:${s.color}"></div>${s.label}`;
+    item.onclick = () => {
+      if (hiddenSeries.has(s.key)) hiddenSeries.delete(s.key);
+      else hiddenSeries.add(s.key);
+      drawTrend();
+    };
+    legEl.appendChild(item);
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  PRICE CHART  (Task 2)
+// ═══════════════════════════════════════════════════════
+
+function getPriceData(state) {
+  const years = Object.keys(byYearNat).map(Number).sort(d3.ascending);
+  if (!state) {
+    return years.map(yr => ({ Year: yr, ...byYearNat[yr] }));
+  }
+  const sd = byStateYear[state];
+  if (!sd) return [];
+  return years.filter(yr => sd[yr]).map(yr => ({ Year: yr, ...sd[yr] }));
+}
+
+function drawPrice() {
+  const container = document.getElementById("price-container");
+  const W = container.clientWidth || 940;
+  const H = 200;
+  const M = { top: 10, right: 16, bottom: 34, left: 52 };
+  const iW = W - M.left - M.right;
+  const iH = H - M.top - M.bottom;
+
+  const data = getPriceData(selectedState);
+  const validSeries = PRICE_SERIES.filter(s => !hiddenSeries.has("price_"+s.key));
+
+  const allPVals = validSeries.flatMap(s => data.map(d => N(d[s.key])).filter(v => v > 0));
+  const yMax = d3.max(allPVals) || 20;
+
+  const xScale = d3.scaleLinear().domain([1960, 2019]).range([0, iW]);
+  const yScale = d3.scaleLinear().domain([0, yMax]).range([iH, 0]).nice();
+
+  let svg = d3.select("#price-container").select("svg");
+  if (svg.empty()) {
+    container.innerHTML = "";
+    svg = d3.select("#price-container")
+      .append("svg").attr("class","chart-svg");
+  }
+  svg.attr("width", W).attr("height", H).selectAll("*").remove();
+  const g = svg.append("g").attr("transform", `translate(${M.left},${M.top})`);
+
+  g.append("g").attr("class","grid")
+    .call(d3.axisLeft(yScale).tickSize(-iW).tickFormat("").ticks(5));
+  g.append("g").attr("class","axis")
+    .attr("transform",`translate(0,${iH})`)
+    .call(d3.axisBottom(xScale).tickFormat(d3.format("d")).ticks(10));
+  g.append("g").attr("class","axis")
+    .call(d3.axisLeft(yScale).ticks(5));
+
+  g.append("text")
+    .attr("transform","rotate(-90)")
+    .attr("x",-iH/2).attr("y",-42)
+    .attr("text-anchor","middle")
+    .style("font-size",".65rem").style("fill","var(--muted)")
+    .text("Price ($/MMBtu)");
+
+  PRICE_SERIES.forEach(s => {
+    if (hiddenSeries.has("price_"+s.key)) return;
+    const lineGen = d3.line()
+      .x(d => xScale(d.Year))
+      .y(d => yScale(N(d[s.key])))
+      .defined(d => N(d[s.key]) > 0);
+    const p = g.append("path")
+      .datum(data)
+      .attr("class","line-path")
+      .attr("d", lineGen)
+      .attr("stroke", s.color);
+    if (s.dash) p.attr("stroke-dasharray", s.dash);
+  });
+
+  // hover
+  const bisect = d3.bisector(d => d.Year).left;
+  const vLine2 = g.append("line")
+    .attr("stroke","#aaa").attr("stroke-width",1)
+    .attr("stroke-dasharray","3,2")
+    .attr("y1",0).attr("y2",iH).style("opacity",0);
+
+  g.append("rect")
+    .attr("width",iW).attr("height",iH).attr("fill","none")
+    .attr("pointer-events","all")
+    .on("mousemove", evt => {
+      const [mx] = d3.pointer(evt);
+      const yr = Math.round(xScale.invert(mx));
+      const row = data.find(d => +d.Year === yr);
+      if (!row) return;
+      vLine2.attr("x1",xScale(yr)).attr("x2",xScale(yr)).style("opacity",1);
+      const lines = PRICE_SERIES.filter(s => !hiddenSeries.has("price_"+s.key) && N(row[s.key]) > 0)
+        .map(s => `<span style="color:${s.color}">■</span> ${s.label}: <b>$${fmtP(N(row[s.key]))}</b>`)
+        .join("<br>");
+      tooltip(`<strong>${yr}${selectedState ? " · "+selectedState : ""}</strong><br>${lines}`, evt);
+    })
+    .on("mouseleave", () => { vLine2.style("opacity",0); hideTooltip(); });
+
+  // legend
+  const legEl = document.getElementById("price-legend");
+  legEl.innerHTML = "";
+  PRICE_SERIES.forEach(s => {
+    const item = document.createElement("div");
+    item.className = "leg-item" + (hiddenSeries.has("price_"+s.key) ? " faded" : "");
+    item.innerHTML = `<div class="leg-swatch" style="background:${s.color}"></div>${s.label}`;
+    item.onclick = () => {
+      if (hiddenSeries.has("price_"+s.key)) hiddenSeries.delete("price_"+s.key);
+      else hiddenSeries.add("price_"+s.key);
+      drawPrice();
+    };
+    legEl.appendChild(item);
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════
+
+loadData().catch(err => {
+  console.error(err);
+  ["map-container","trend-container","price-container"].forEach(id => {
+    document.getElementById(id).innerHTML =
+      `<div class="loading" style="color:#c0392b;">
+        ⚠ Failed to load data. Run from a local server:<br>
+        <code>python3 -m http.server 8000</code>
+      </div>`;
+  });
+});
+</script>
+
+</body>
+</html>
